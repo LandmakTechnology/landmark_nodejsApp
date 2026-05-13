@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/card";
 import { useLocation } from "wouter";
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { ArrowLeft, Send, Trash2, Users } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Database, Send, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
 export default function ContactForm() {
@@ -16,8 +16,18 @@ export default function ContactForm() {
   const [country, setCountry] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Poll the database status every 10 seconds so the UI updates automatically
+  // once the database pod is deployed in Kubernetes.
+  const { data: dbStatus } = trpc.dbStatus.useQuery(undefined, {
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: true,
+  });
+  const dbAvailable = dbStatus?.available ?? false;
+
   // Query contacts
-  const { data: contacts = [], isLoading, refetch } = trpc.contacts.list.useQuery();
+  const { data: contacts = [], isLoading, refetch } = trpc.contacts.list.useQuery(undefined, {
+    refetchInterval: dbAvailable ? 30_000 : false,
+  });
 
   // Mutations
   const createContact = trpc.contacts.create.useMutation({
@@ -51,7 +61,6 @@ export default function ContactForm() {
       toast.error("Please fill in all fields");
       return;
     }
-
     setIsSubmitting(true);
     try {
       await createContact.mutateAsync({
@@ -66,6 +75,8 @@ export default function ContactForm() {
     }
   };
 
+  const isFormDisabled = isSubmitting || createContact.isPending || !dbAvailable;
+
   return (
     <div className="min-h-screen relative overflow-hidden">
       {/* Animated background */}
@@ -78,56 +89,92 @@ export default function ContactForm() {
       <nav className="relative z-10 border-b border-orange-400/30 bg-gradient-to-r from-orange-900/20 to-orange-800/10 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           <Button
-            onClick={() => navigate("/")}
             variant="ghost"
+            onClick={() => navigate("/")}
             className="text-cream hover:text-yellow-400 gap-2"
           >
             <ArrowLeft className="w-4 h-4" />
             Back to Home
           </Button>
-          <h1 className="text-2xl font-bold text-cream tracking-wider">CONTACT FORM</h1>
-          <div className="text-cream text-sm">Contacts: {contacts.length}</div>
+          {/* Live database status indicator */}
+          <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm font-semibold ${
+            dbAvailable
+              ? "bg-green-900/40 border border-green-400/40 text-green-300"
+              : "bg-red-900/40 border border-red-400/40 text-red-300"
+          }`}>
+            <Database className="w-4 h-4" />
+            {dbAvailable ? "Database Connected" : "Database Offline"}
+          </div>
         </div>
       </nav>
 
-      {/* Main Content */}
-      <div className="relative z-5 max-w-6xl mx-auto px-4 py-12">
-        {/* Contact Form */}
-        <Card className="mb-12 p-8 bg-orange-900/40 border-orange-400/30">
-          <h2 className="text-2xl font-bold text-cream mb-6 tracking-wider">SUBMIT YOUR DETAILS</h2>
+      <div className="relative z-10 max-w-7xl mx-auto px-4 py-12">
+
+        {/* ── Database Unavailable Banner ─────────────────────────────────── */}
+        {!dbAvailable && (
+          <div className="mb-8 flex items-start gap-4 p-5 rounded-xl border border-amber-400/50 bg-amber-900/30 text-amber-200">
+            <AlertTriangle className="w-6 h-6 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-amber-300 text-lg">Database Not Available</p>
+              <p className="mt-1 text-sm leading-relaxed">
+                The application is running but the database service has not been deployed yet.
+                You can browse the page normally, but contact submissions are disabled until
+                the database pod is running and healthy.
+              </p>
+              <p className="mt-2 text-xs text-amber-400/80 font-mono">
+                Kubernetes: deploy the MySQL StatefulSet to enable data persistence.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Contact Form ─────────────────────────────────────────────────── */}
+        <Card className={`p-8 mb-12 bg-orange-900/40 border-orange-400/30 ${
+          !dbAvailable ? "opacity-75" : ""
+        }`}>
+          <div className="flex items-center gap-3 mb-8">
+            <Send className="w-8 h-8 text-yellow-400" />
+            <h2 className="text-2xl font-bold text-cream tracking-wider">SUBMIT CONTACT</h2>
+            {!dbAvailable && (
+              <span className="ml-auto text-xs font-semibold px-2 py-1 rounded bg-red-900/50 border border-red-400/40 text-red-300">
+                SUBMISSIONS DISABLED
+              </span>
+            )}
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="block text-cream font-bold mb-2 tracking-wider">Name</label>
+                <label className="block text-cream font-bold mb-2 tracking-wider">Full Name</label>
                 <Input
                   type="text"
-                  placeholder="Enter your name..."
+                  placeholder="Enter your full name..."
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="bg-orange-900/50 border-orange-400/50 text-cream placeholder:text-cream/50"
-                  disabled={isSubmitting}
+                  disabled={isFormDisabled}
                 />
               </div>
               <div>
-                <label className="block text-cream font-bold mb-2 tracking-wider">Email</label>
+                <label className="block text-cream font-bold mb-2 tracking-wider">Email Address</label>
                 <Input
                   type="email"
                   placeholder="Enter your email..."
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="bg-orange-900/50 border-orange-400/50 text-cream placeholder:text-cream/50"
-                  disabled={isSubmitting}
+                  disabled={isFormDisabled}
                 />
               </div>
               <div>
-                <label className="block text-cream font-bold mb-2 tracking-wider">Contact</label>
+                <label className="block text-cream font-bold mb-2 tracking-wider">Phone Number</label>
                 <Input
-                  type="tel"
+                  type="text"
                   placeholder="Enter your phone number..."
                   value={contact}
                   onChange={(e) => setContact(e.target.value)}
                   className="bg-orange-900/50 border-orange-400/50 text-cream placeholder:text-cream/50"
-                  disabled={isSubmitting}
+                  disabled={isFormDisabled}
                 />
               </div>
               <div>
@@ -138,7 +185,7 @@ export default function ContactForm() {
                   value={country}
                   onChange={(e) => setCountry(e.target.value)}
                   className="bg-orange-900/50 border-orange-400/50 text-cream placeholder:text-cream/50"
-                  disabled={isSubmitting}
+                  disabled={isFormDisabled}
                 />
               </div>
             </div>
@@ -150,21 +197,25 @@ export default function ContactForm() {
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
                 className="bg-orange-900/50 border-orange-400/50 text-cream placeholder:text-cream/50"
-                disabled={isSubmitting}
+                disabled={isFormDisabled}
               />
             </div>
             <Button
               type="submit"
-              disabled={isSubmitting || createContact.isPending}
-              className="bg-yellow-400 text-orange-900 hover:bg-yellow-300 font-bold tracking-wider gap-2 w-full"
+              disabled={isFormDisabled}
+              className="bg-yellow-400 text-orange-900 hover:bg-yellow-300 font-bold tracking-wider gap-2 w-full disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Send className="w-4 h-4" />
-              {isSubmitting ? "Saving..." : "Submit"}
+              {isSubmitting
+                ? "Saving..."
+                : !dbAvailable
+                ? "Database Required to Submit"
+                : "Submit"}
             </Button>
           </form>
         </Card>
 
-        {/* Contacts Table */}
+        {/* ── Contacts Table ───────────────────────────────────────────────── */}
         <div>
           <div className="flex items-center gap-3 mb-6">
             <Users className="w-8 h-8 text-yellow-400" />
@@ -172,14 +223,17 @@ export default function ContactForm() {
               SUBMITTED CONTACTS ({contacts.length})
             </h2>
           </div>
-
           {isLoading ? (
             <div className="text-center py-12">
               <p className="text-cream/70">Loading contacts...</p>
             </div>
           ) : contacts.length === 0 ? (
             <Card className="p-12 text-center bg-orange-900/40 border-orange-400/30">
-              <p className="text-cream/70 mb-4">No contacts yet. Be the first to submit!</p>
+              <p className="text-cream/70 mb-4">
+                {dbAvailable
+                  ? "No contacts yet. Be the first to submit!"
+                  : "No data — database is not connected."}
+              </p>
             </Card>
           ) : (
             <div className="overflow-x-auto">
@@ -196,26 +250,26 @@ export default function ContactForm() {
                   </tr>
                 </thead>
                 <tbody>
-                  {contacts.map((contact: any) => (
+                  {contacts.map((c: any) => (
                     <tr
-                      key={contact.id}
+                      key={c.id}
                       className="border-b border-orange-400/20 hover:bg-orange-900/20 transition-colors"
                     >
-                      <td className="px-6 py-4 text-cream">{contact.name}</td>
-                      <td className="px-6 py-4 text-cream">{contact.email}</td>
-                      <td className="px-6 py-4 text-cream">{contact.contact}</td>
-                      <td className="px-6 py-4 text-cream">{contact.address}</td>
-                      <td className="px-6 py-4 text-cream">{contact.country}</td>
+                      <td className="px-6 py-4 text-cream">{c.name}</td>
+                      <td className="px-6 py-4 text-cream">{c.email}</td>
+                      <td className="px-6 py-4 text-cream">{c.contact}</td>
+                      <td className="px-6 py-4 text-cream">{c.address}</td>
+                      <td className="px-6 py-4 text-cream">{c.country}</td>
                       <td className="px-6 py-4 text-cream/60 text-sm">
-                        {new Date(contact.createdAt).toLocaleDateString()}
+                        {new Date(c.createdAt).toLocaleDateString()}
                       </td>
                       <td className="px-6 py-4 text-center">
                         <Button
-                          onClick={() => deleteContact.mutate({ id: contact.id })}
+                          onClick={() => deleteContact.mutate({ id: c.id })}
                           variant="ghost"
                           size="sm"
                           className="text-red-400 hover:text-red-300"
-                          disabled={deleteContact.isPending}
+                          disabled={deleteContact.isPending || !dbAvailable}
                         >
                           <Trash2 className="w-4 h-4" />
                         </Button>
